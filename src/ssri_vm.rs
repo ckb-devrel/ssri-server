@@ -121,11 +121,12 @@ impl Context {
         let script = self.script.as_ref().ok_or(error!("Script is missing"))?;
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let offset = machine.registers()[A2];
-
+        
         let bytes = script.as_slice().to_vec();
+        let len = bytes.len() as u64;
         output!(machine, len_addr, bytes, addr, offset, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -136,11 +137,12 @@ impl Context {
         let script = self.script.as_ref().ok_or(error!("Script is missing"))?;
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let offset = machine.registers()[A2];
 
         let bytes = script.calc_script_hash().raw_data().to_vec();
+        let len = bytes.len() as u64;
         output!(machine, len_addr, bytes, addr, offset, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -151,7 +153,6 @@ impl Context {
         let cell = self.cell.clone().ok_or(error!("Cell is missing"))?;
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let offset = machine.registers()[A2];
         let index = machine.registers()[A3];
         let source = machine.registers()[A4];
@@ -161,7 +162,9 @@ impl Context {
         }
 
         let bytes = CellOutput::from(cell.cell_output).as_slice().to_vec();
+        let len = bytes.len() as u64;
         output!(machine, len_addr, bytes, addr, offset, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -172,7 +175,6 @@ impl Context {
         let cell = self.cell.clone().ok_or(error!("Cell is missing"))?;
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let offset = machine.registers()[A2];
         let index = machine.registers()[A3];
         let source = machine.registers()[A4];
@@ -182,7 +184,9 @@ impl Context {
         }
 
         let bytes = cell.hex_data.ok_or(error!("Cell data is missing"))?.hex;
+        let len = bytes.len() as u64;
         output!(machine, len_addr, bytes, addr, offset, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -193,7 +197,6 @@ impl Context {
         let cell = self.cell.clone().ok_or(error!("Cell is missing"))?;
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let offset = machine.registers()[A2];
         let index = machine.registers()[A3];
         let source = machine.registers()[A4];
@@ -240,8 +243,10 @@ impl Context {
                     .to_vec()
             }
         };
+        let len = bytes.len() as u64;
 
         output!(machine, len_addr, bytes, addr, offset, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -251,7 +256,6 @@ impl Context {
     ) -> Result<(), ckb_vm::error::Error> {
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let script_addr = machine.registers()[A2];
         let script_len = machine.registers()[A3];
 
@@ -274,7 +278,9 @@ impl Context {
         };
 
         let out_point = OutPoint::from(cell.out_point);
+        let len: u64 = out_point.as_slice().len() as u64;
         output!(machine, len_addr, out_point.as_slice(), addr, 0, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -284,7 +290,6 @@ impl Context {
     ) -> Result<(), ckb_vm::error::Error> {
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let outpoint_addr = machine.registers()[A2];
 
         let out_point = OutPoint::from_slice(
@@ -311,7 +316,9 @@ impl Context {
             .ok_or(error!("Cell not found"))?
             .output
             .into();
+        let len: u64 = cell.as_slice().len() as u64;
         output!(machine, len_addr, cell.as_slice(), addr, 0, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 
@@ -321,7 +328,6 @@ impl Context {
     ) -> Result<(), ckb_vm::error::Error> {
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
-        let len = machine.memory_mut().load64(&len_addr)?;
         let outpoint_addr = machine.registers()[A2];
 
         let out_point = OutPoint::from_slice(
@@ -348,8 +354,9 @@ impl Context {
             .ok_or(error!("Cell not found"))?
             .data
             .unwrap();
-
+        let len: u64 = data.content.as_bytes().len() as u64;
         output!(machine, len_addr, data.content.as_bytes(), addr, 0, len);
+        machine.set_register(A0, 0);
         Ok(())
     }
 }
