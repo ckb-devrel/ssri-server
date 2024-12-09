@@ -83,8 +83,7 @@ impl RpcServerImpl {
                     index: index.into(),
                 },
                 true,
-            )
-            .await?;
+            ).await?;
 
         tracing::info!("Running script on {tx_hash}:{index} with args {args:?}");
 
@@ -127,6 +126,7 @@ impl RpcServer for RpcServerImpl {
         args: Vec<Hex>,
         script: Script,
     ) -> Result<Option<Hex>, ErrorObjectOwned> {
+        println!("script: {:?}", script);
         self.run_script(tx_hash, index, args, Some(script), None, None)
             .await
     }
