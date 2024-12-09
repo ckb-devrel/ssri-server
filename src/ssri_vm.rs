@@ -4,18 +4,23 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
 use ckb_hash::blake2b_256;
+use ckb_jsonrpc_types::Uint32;
 use ckb_sdk::traits::CellQueryOptions;
+use ckb_sdk::CkbRpcClient;
 use ckb_types::core::Capacity;
-use ckb_types::packed::{CellOutput, OutPoint, Script, Transaction};
-use ckb_types::prelude::Entity;
+use ckb_types::packed::{CellOutput, CellOutputBuilder, OutPoint, Script, Transaction};
+use ckb_types::prelude::{Entity, ShouldBeOk};
 use ckb_vm::cost_model::estimate_cycles;
 use ckb_vm::registers::{A0, A1, A2, A3, A4, A5, A7};
 use ckb_vm::{Bytes, Memory, Register, SupportMachine, Syscalls};
 use hex::encode;
+use jsonrpc_core::futures::TryFutureExt;
 
 use crate::error::Error;
 use crate::rpc_client::RpcClient;
 use crate::types::CellOutputWithData;
+
+pub const SPAWN_YIELD_CYCLES_BASE: u64 = 800;
 
 macro_rules! error {
     ($err:expr) => {{
@@ -122,7 +127,7 @@ impl Context {
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
         let offset = machine.registers()[A2];
-        
+
         let bytes = script.as_slice().to_vec();
         let len = bytes.len() as u64;
         output!(machine, len_addr, bytes, addr, offset, len);
@@ -254,6 +259,7 @@ impl Context {
         &self,
         machine: &mut impl SupportMachine<REG = u64>,
     ) -> Result<(), ckb_vm::error::Error> {
+        println!("VM | Entered find_out_point_by_type");
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
         let script_addr = machine.registers()[A2];
@@ -265,17 +271,19 @@ impl Context {
         let rpc = self.rpc.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let cell = rt
-                .block_on(rpc.get_cells(CellQueryOptions::new_type(script).into(), 1, None))
-                .map_err(|err| error!(err))
-                .map(|v| v.objects.into_iter().next());
+            let cell = rpc.get_cells(CellQueryOptions::new_type(script).into(), 1, None);
             tx.send(cell).unwrap();
         });
 
-        let Some(cell) = rx.recv().unwrap()? else {
-            return Err(error!("Cell not found"));
-        };
+        let cell_pagination = rx
+            .recv()
+            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?;
+        let cell = cell_pagination
+            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
+            .objects
+            .into_iter()
+            .next()
+            .ok_or(error!("Cell not found"))?;
 
         let out_point = OutPoint::from(cell.out_point);
         let len: u64 = out_point.as_slice().len() as u64;
@@ -302,20 +310,20 @@ impl Context {
         let rpc = self.rpc.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let cell = rt
-                .block_on(rpc.get_live_cell(&out_point.into(), false))
-                .map_err(|err| error!(err))
-                .map(|v| v.cell);
+            let cell = rpc.get_live_cell_ckb(&out_point.into(), false);
             tx.send(cell).unwrap();
         });
 
-        let cell: CellOutput = rx
+        let cell_pagination = rx
             .recv()
-            .unwrap()?
-            .ok_or(error!("Cell not found"))?
-            .output
-            .into();
+            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?;
+
+        let cell = cell_pagination
+            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
+            .cell
+            .should_be_ok()
+            .output;
+        let cell = CellOutput::from(cell);
         let len: u64 = cell.as_slice().len() as u64;
         output!(machine, len_addr, cell.as_slice(), addr, 0, len);
         machine.set_register(A0, 0);
@@ -340,22 +348,29 @@ impl Context {
         let rpc = self.rpc.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let cell = rt
-                .block_on(rpc.get_live_cell(&out_point.into(), true))
-                .map_err(|err| error!(err))
-                .map(|v| v.cell);
+            let cell = rpc.get_live_cell_ckb(&out_point.into(), true);
             tx.send(cell).unwrap();
         });
 
-        let data = rx
+        let cell_pagination = rx
             .recv()
-            .unwrap()?
-            .ok_or(error!("Cell not found"))?
-            .data
-            .unwrap();
+            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?;
+
+        let data = cell_pagination
+            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
+            .cell
+            .should_be_ok()
+            .data.should_be_ok();
         let len: u64 = data.content.as_bytes().len() as u64;
         output!(machine, len_addr, data.content.as_bytes(), addr, 0, len);
+        machine.set_register(A0, 0);
+        Ok(())
+    }
+    // In this way, pipe() would always return [0, 0].
+    fn pipe(
+        &self,
+        machine: &mut impl SupportMachine<REG = u64>,
+    ) -> Result<(), ckb_vm::error::Error> {
         machine.set_register(A0, 0);
         Ok(())
     }
@@ -378,7 +393,7 @@ impl<M: SupportMachine<REG = u64>> Syscalls<M> for Context {
             // load_cell - cell
             2071 => self.load_cell(machine)?,
             // load_cell_data - cell
-            2091 => self.load_cell_data(machine)?,
+            2092 => self.load_cell_data(machine)?,
             // load_cell_by_field - cell
             2081 => self.load_cell_by_field(machine)?,
             // find_out_point_by_type - code
@@ -389,9 +404,21 @@ impl<M: SupportMachine<REG = u64>> Syscalls<M> for Context {
             2297 => self.find_cell_data_by_out_point(machine)?,
 
             // set_content - code
-            2103 => {
-                let addr = machine.registers()[A0].to_u64();
-                let len = machine.registers()[A1];
+            // 2103 => {
+            //     let addr = machine.registers()[A0].to_u64();
+            //     let len = machine.registers()[A1];
+            //     let len = machine.memory_mut().load64(&len)?;
+
+            //     *self.content.clone().lock().unwrap() =
+            //         Some(machine.memory_mut().load_bytes(addr, len)?);
+            // }
+            // pipe - code
+            2604 => self.pipe(machine)?,
+            // write - code
+            // NOTE: This would be working in the set_content way but using write for compatibility
+            2605 => {
+                let addr = machine.registers()[A1].to_u64();
+                let len = machine.registers()[A2];
                 let len = machine.memory_mut().load64(&len)?;
 
                 *self.content.clone().lock().unwrap() =
