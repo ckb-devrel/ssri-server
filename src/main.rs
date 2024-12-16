@@ -12,7 +12,9 @@ mod ssri_vm;
 mod types;
 
 use error::Error;
+use hyper::Method;
 use rpc_client::RpcClient;
+use tower_http::cors::{Any, CorsLayer};
 use types::{CellOutputWithData, Hex};
 
 use ssri_vm::execute_riscv_binary;
@@ -83,7 +85,8 @@ impl RpcServerImpl {
                     index: index.into(),
                 },
                 true,
-            ).await?;
+            )
+            .await?;
 
         tracing::info!("Running script on {tx_hash}:{index} with args {args:?}");
 
@@ -173,7 +176,17 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_server(ckb_rpc: &str, server_addr: &str) -> anyhow::Result<()> {
-    let server = Server::builder().build(server_addr).await?;
+    let cors = CorsLayer::new()
+        // Allow `POST` when accessing the resource
+        .allow_methods([Method::POST])
+        // Allow requests from any origin
+        .allow_origin(Any)
+        .allow_headers([hyper::header::CONTENT_TYPE]);
+    let middleware = tower::ServiceBuilder::new().layer(cors);
+    let server = Server::builder()
+        .set_http_middleware(middleware)
+        .build(server_addr)
+        .await?;
 
     let handle = server.start(RpcServerImpl::new(ckb_rpc).into_rpc());
 
