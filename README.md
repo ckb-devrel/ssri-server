@@ -31,3 +31,8 @@ For example, you get the param to call "SSRI.get_methods" by running the followi
   let get_methods_path_path_hex = encode_hex(&get_methods_path_in_bytes);
   // get_methods_path_hex is `0x58f02409de9de7b1`
 ```
+
+
+# Attempt for WASM
+https://github.com/rustwasm/wasm-bindgen/issues/2753
+Due to the limitations of WASM and browser related runtime that are single-threaded, as CKB-VM currently requires `Sync` and `Send` for trait `Syscall`, it is not promising to implement running CKB-VM in the browser with WASM. Attempt suspended.
