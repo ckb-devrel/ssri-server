@@ -1,0 +1,10 @@
+.git*
+
+*docker-compose*
+*Dockerfile*
+.dockerignore
+
+target
+
+README.md
+.vscode
