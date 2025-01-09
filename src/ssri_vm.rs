@@ -1,5 +1,6 @@
 // refer to https://github.com/nervosnetwork/ckb-vm/blob/develop/examples/ckb-vm-runner.rs
 
+use std::collections::HashSet;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +16,7 @@ use hex::encode;
 
 use crate::error::Error;
 use crate::rpc_client::RpcClient;
-use crate::types::CellOutputWithData;
+use crate::types::{CellOutputWithData, Hex, VmResult};
 use crate::Config;
 
 macro_rules! error {
@@ -89,6 +90,7 @@ impl TryFrom<u64> for CellField {
 struct Context {
     config: Config,
     content: Arc<Mutex<Option<Bytes>>>,
+    cell_deps: Arc<Mutex<HashSet<OutPoint>>>,
     rpc: RpcClient,
     script: Option<Script>,
     cell: Option<CellOutputWithData>,
@@ -107,6 +109,7 @@ impl Context {
         Self {
             config,
             content: Arc::new(Mutex::new(None)),
+            cell_deps: Arc::new(Mutex::new(HashSet::new())),
             rpc,
             script,
             cell,
@@ -302,6 +305,11 @@ impl Context {
                 .load_bytes(outpoint_addr, OutPoint::TOTAL_SIZE as u64)?,
         )
         .map_err(|_| error!("Invalid type script"))?;
+        self.cell_deps
+            .clone()
+            .lock()
+            .unwrap()
+            .insert(out_point.clone());
 
         let rpc = self.rpc.clone();
         let (tx, rx) = channel();
@@ -340,6 +348,11 @@ impl Context {
                 .load_bytes(outpoint_addr, OutPoint::TOTAL_SIZE as u64)?,
         )
         .map_err(|_| error!("Invalid type script"))?;
+        self.cell_deps
+            .clone()
+            .lock()
+            .unwrap()
+            .insert(out_point.clone());
 
         let rpc = self.rpc.clone();
         let (tx, rx) = channel();
@@ -455,7 +468,7 @@ pub fn execute_riscv_binary(
     script: Option<Script>,
     cell: Option<CellOutputWithData>,
     tx: Option<Transaction>,
-) -> Result<Option<Bytes>, Error> {
+) -> Result<VmResult, Error> {
     let context = Context::new(config, rpc, script, cell, tx);
 
     let asm_core = ckb_vm::machine::asm::AsmCoreMachine::new(
@@ -483,6 +496,10 @@ pub fn execute_riscv_binary(
         return Err(Error::Script(error_code));
     }
 
-    let result = context.content.lock().unwrap().clone();
-    Ok(result)
+    let content = context.content.lock().unwrap().clone();
+    let cell_deps = context.cell_deps.lock().unwrap().clone();
+    Ok(VmResult {
+        content: content.map(|v| v.into()).unwrap_or(Hex { hex: Vec::new() }),
+        cell_deps: cell_deps.into_iter().map(|v| v.into()).collect(),
+    })
 }

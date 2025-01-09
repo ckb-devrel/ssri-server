@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use std::fmt::Debug;
 
-use ckb_jsonrpc_types::CellOutput;
+use ckb_jsonrpc_types::{CellOutput, OutPoint};
 use ckb_vm::Bytes;
 use core::fmt;
 use hex::{FromHex, ToHex};
@@ -89,4 +89,10 @@ impl From<Bytes> for Hex {
 pub struct CellOutputWithData {
     pub cell_output: CellOutput,
     pub hex_data: Option<Hex>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VmResult {
+    pub content: Hex,
+    pub cell_deps: Vec<OutPoint>,
 }

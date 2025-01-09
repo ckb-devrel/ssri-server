@@ -16,7 +16,7 @@ use hyper::Method;
 use rpc_client::RpcClient;
 use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
-use types::{CellOutputWithData, Hex};
+use types::{CellOutputWithData, Hex, VmResult};
 
 use ssri_vm::execute_riscv_binary;
 
@@ -45,7 +45,7 @@ pub trait Rpc {
         tx_hash: H256,
         index: u32,
         args: Vec<Hex>,
-    ) -> Result<Option<Hex>, ErrorObjectOwned>;
+    ) -> Result<VmResult, ErrorObjectOwned>;
 
     #[method(name = "run_script_level_script")]
     async fn run_script_level_script(
@@ -54,7 +54,7 @@ pub trait Rpc {
         index: u32,
         args: Vec<Hex>,
         script: Script,
-    ) -> Result<Option<Hex>, ErrorObjectOwned>;
+    ) -> Result<VmResult, ErrorObjectOwned>;
 
     #[method(name = "run_script_level_cell")]
     async fn run_script_level_cell(
@@ -63,7 +63,7 @@ pub trait Rpc {
         index: u32,
         args: Vec<Hex>,
         cell: CellOutputWithData,
-    ) -> Result<Option<Hex>, ErrorObjectOwned>;
+    ) -> Result<VmResult, ErrorObjectOwned>;
 
     #[method(name = "run_script_level_tx")]
     async fn run_script_level_tx(
@@ -72,7 +72,7 @@ pub trait Rpc {
         index: u32,
         args: Vec<Hex>,
         tx: TransactionView,
-    ) -> Result<Option<Hex>, ErrorObjectOwned>;
+    ) -> Result<VmResult, ErrorObjectOwned>;
 }
 
 pub struct RpcServerImpl {
@@ -96,7 +96,7 @@ impl RpcServerImpl {
         script: Option<Script>,
         cell: Option<CellOutputWithData>,
         tx: Option<TransactionView>,
-    ) -> Result<Option<Hex>, ErrorObjectOwned> {
+    ) -> Result<VmResult, ErrorObjectOwned> {
         let ssri_cell = self
             .rpc
             .get_live_cell(
@@ -132,8 +132,7 @@ impl RpcServerImpl {
             script,
             cell,
             tx,
-        )?
-        .map(|v| v.into());
+        )?;
         tracing::info!("{description}\nresult {res:?}");
 
         Ok(res)
@@ -147,7 +146,7 @@ impl RpcServer for RpcServerImpl {
         tx_hash: H256,
         index: u32,
         args: Vec<Hex>,
-    ) -> Result<Option<Hex>, ErrorObjectOwned> {
+    ) -> Result<VmResult, ErrorObjectOwned> {
         self.run_script(tx_hash, index, args, None, None, None)
             .await
     }
@@ -158,7 +157,7 @@ impl RpcServer for RpcServerImpl {
         index: u32,
         args: Vec<Hex>,
         script: Script,
-    ) -> Result<Option<Hex>, ErrorObjectOwned> {
+    ) -> Result<VmResult, ErrorObjectOwned> {
         self.run_script(tx_hash, index, args, Some(script), None, None)
             .await
     }
@@ -169,7 +168,7 @@ impl RpcServer for RpcServerImpl {
         index: u32,
         args: Vec<Hex>,
         cell: CellOutputWithData,
-    ) -> Result<Option<Hex>, ErrorObjectOwned> {
+    ) -> Result<VmResult, ErrorObjectOwned> {
         self.run_script(tx_hash, index, args, None, Some(cell), None)
             .await
     }
@@ -180,7 +179,7 @@ impl RpcServer for RpcServerImpl {
         index: u32,
         args: Vec<Hex>,
         tx: TransactionView,
-    ) -> Result<Option<Hex>, ErrorObjectOwned> {
+    ) -> Result<VmResult, ErrorObjectOwned> {
         self.run_script(tx_hash, index, args, None, None, Some(tx))
             .await
     }
