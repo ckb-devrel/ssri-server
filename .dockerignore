@@ -5,6 +5,7 @@
 .dockerignore
 
 target
+config.*
 
 README.md
 .vscode

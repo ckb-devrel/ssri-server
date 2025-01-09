@@ -1,4 +1,4 @@
-ckb_rpc = "https://testnet.ckb.dev/"
+ckb_rpc = "https://mainnet.ckb.dev/"
 server_addr = "0.0.0.0:9090"
 
 script_debug = false

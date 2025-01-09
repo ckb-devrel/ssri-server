@@ -4,31 +4,25 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
 use ckb_hash::blake2b_256;
-use ckb_jsonrpc_types::Uint32;
 use ckb_sdk::traits::CellQueryOptions;
-use ckb_sdk::CkbRpcClient;
 use ckb_types::core::Capacity;
-use ckb_types::packed::{CellOutput, CellOutputBuilder, OutPoint, Script, Transaction};
+use ckb_types::packed::{CellOutput, OutPoint, Script, Transaction};
 use ckb_types::prelude::{Entity, ShouldBeOk};
 use ckb_vm::cost_model::estimate_cycles;
 use ckb_vm::registers::{A0, A1, A2, A3, A4, A5, A7};
 use ckb_vm::{Bytes, Memory, Register, SupportMachine, Syscalls};
 use hex::encode;
-use jsonrpc_core::futures::TryFutureExt;
 
 use crate::error::Error;
 use crate::rpc_client::RpcClient;
 use crate::types::CellOutputWithData;
-
-pub const SPAWN_YIELD_CYCLES_BASE: u64 = 800;
+use crate::Config;
 
 macro_rules! error {
     ($err:expr) => {{
         let error = $err.to_string();
         #[cfg(test)]
         println!("[ERROR] {error}");
-        #[cfg(not(test))]
-        jsonrpsee::tracing::error!("{error}");
         ckb_vm::error::Error::Unexpected(error)
     }};
 }
@@ -93,6 +87,7 @@ impl TryFrom<u64> for CellField {
 
 #[derive(Clone)]
 struct Context {
+    config: Config,
     content: Arc<Mutex<Option<Bytes>>>,
     rpc: RpcClient,
     script: Option<Script>,
@@ -103,12 +98,14 @@ struct Context {
 
 impl Context {
     pub fn new(
+        config: Config,
         rpc: RpcClient,
         script: Option<Script>,
         cell: Option<CellOutputWithData>,
         tx: Option<Transaction>,
     ) -> Self {
         Self {
+            config,
             content: Arc::new(Mutex::new(None)),
             rpc,
             script,
@@ -259,7 +256,6 @@ impl Context {
         &self,
         machine: &mut impl SupportMachine<REG = u64>,
     ) -> Result<(), ckb_vm::error::Error> {
-        println!("VM | Entered find_out_point_by_type");
         let addr = machine.registers()[A0].to_u64();
         let len_addr = machine.registers()[A1];
         let script_addr = machine.registers()[A2];
@@ -360,7 +356,8 @@ impl Context {
             .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
             .cell
             .should_be_ok()
-            .data.should_be_ok();
+            .data
+            .should_be_ok();
         let len: u64 = data.content.as_bytes().len() as u64;
         output!(machine, len_addr, data.content.as_bytes(), addr, 0, len);
         machine.set_register(A0, 0);
@@ -426,6 +423,9 @@ impl<M: SupportMachine<REG = u64>> Syscalls<M> for Context {
             }
             // debug - code
             2177 => {
+                if !self.config.script_debug {
+                    return Ok(true);
+                }
                 let mut addr = machine.registers()[A0];
                 let mut buffer = Vec::new();
 
@@ -448,6 +448,7 @@ impl<M: SupportMachine<REG = u64>> Syscalls<M> for Context {
 }
 
 pub fn execute_riscv_binary(
+    config: Config,
     rpc: RpcClient,
     code: Bytes,
     args: Vec<Bytes>,
@@ -455,7 +456,7 @@ pub fn execute_riscv_binary(
     cell: Option<CellOutputWithData>,
     tx: Option<Transaction>,
 ) -> Result<Option<Bytes>, Error> {
-    let context = Context::new(rpc, script, cell, tx);
+    let context = Context::new(config, rpc, script, cell, tx);
 
     let asm_core = ckb_vm::machine::asm::AsmCoreMachine::new(
         ckb_vm::ISA_IMC | ckb_vm::ISA_B | ckb_vm::ISA_MOP | ckb_vm::ISA_A,

@@ -20,17 +20,19 @@ use types::{CellOutputWithData, Hex};
 
 use ssri_vm::execute_riscv_binary;
 
-#[derive(Debug, Deserialize)]
-struct Settings {
+#[derive(Debug, Deserialize, Clone)]
+pub struct Config {
     ckb_rpc: String,
     server_addr: String,
+    script_debug: bool,
 }
 
-impl Default for Settings {
+impl Default for Config {
     fn default() -> Self {
         Self {
-            ckb_rpc: "https://testnet.ckbapp.dev/".to_string(),
+            ckb_rpc: "https://testnet.ckb.dev/".to_string(),
             server_addr: "0.0.0.0:9090".to_string(),
+            script_debug: true,
         }
     }
 }
@@ -74,13 +76,15 @@ pub trait Rpc {
 }
 
 pub struct RpcServerImpl {
+    config: Config,
     rpc: RpcClient,
 }
 
 impl RpcServerImpl {
-    pub fn new(rpc: &str) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
-            rpc: RpcClient::new(rpc),
+            rpc: RpcClient::new(&config.ckb_rpc),
+            config,
         }
     }
 
@@ -119,10 +123,16 @@ impl RpcServerImpl {
         let cell = cell.map(Into::into);
         let tx = tx.map(|v| v.inner.into());
 
-        Ok(
-            execute_riscv_binary(self.rpc.clone(), ssri_binary, args, script, cell, tx)?
-                .map(|v| v.into()),
-        )
+        Ok(execute_riscv_binary(
+            self.config.clone(),
+            self.rpc.clone(),
+            ssri_binary,
+            args,
+            script,
+            cell,
+            tx,
+        )?
+        .map(|v| v.into()))
     }
 }
 
@@ -145,7 +155,6 @@ impl RpcServer for RpcServerImpl {
         args: Vec<Hex>,
         script: Script,
     ) -> Result<Option<Hex>, ErrorObjectOwned> {
-        println!("script: {:?}", script);
         self.run_script(tx_hash, index, args, Some(script), None, None)
             .await
     }
@@ -180,34 +189,34 @@ async fn main() -> anyhow::Result<()> {
         .try_init()
         .expect("setting default subscriber failed");
 
-    // Start with default settings
-    let mut settings = Settings::default();
+    // Start with default config
+    let mut config = Config::default();
 
     // Try to load from config file
-    if let Ok(config) = config::Config::builder()
+    if let Ok(file_config) = config::Config::builder()
         .add_source(config::File::with_name("config"))
         .build()
     {
-        if let Ok(file_settings) = config.try_deserialize::<Settings>() {
-            settings = file_settings;
+        if let Ok(deserialized_config) = file_config.try_deserialize::<Config>() {
+            config = deserialized_config;
         }
     }
 
-    // Override with command line arguments if present
-    if let Some(ckb_rpc) = std::env::args().nth(1) {
-        settings.ckb_rpc = ckb_rpc;
-    }
-    if let Some(server_addr) = std::env::args().nth(2) {
-        settings.server_addr = server_addr;
-    }
-
-    println!("Connecting to RPC with ckb_rpc: {:?}", settings.ckb_rpc);
-    println!("Starting server with server_addr: {:?}", settings.server_addr);
-    run_server(&settings.ckb_rpc, &settings.server_addr).await?;
+    println!(
+        "CKB RPC URI: {}\nListening on: {}\nScript debug {}",
+        config.ckb_rpc,
+        config.server_addr,
+        if config.script_debug {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    run_server(config).await?;
     Ok(())
 }
 
-async fn run_server(ckb_rpc: &str, server_addr: &str) -> anyhow::Result<()> {
+async fn run_server(config: Config) -> anyhow::Result<()> {
     let cors = CorsLayer::new()
         // Allow `POST` when accessing the resource
         .allow_methods([Method::POST])
@@ -217,10 +226,10 @@ async fn run_server(ckb_rpc: &str, server_addr: &str) -> anyhow::Result<()> {
     let middleware = tower::ServiceBuilder::new().layer(cors);
     let server = Server::builder()
         .set_http_middleware(middleware)
-        .build(server_addr)
+        .build(&config.server_addr)
         .await?;
 
-    let handle = server.start(RpcServerImpl::new(ckb_rpc).into_rpc());
+    let handle = server.start(RpcServerImpl::new(config).into_rpc());
 
     tokio::signal::ctrl_c().await.unwrap();
     handle.stop().unwrap();

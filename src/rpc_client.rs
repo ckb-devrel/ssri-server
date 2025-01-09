@@ -96,7 +96,7 @@ impl RpcClient {
         //     cursor,
         // )
         // .boxed()
-        let ckb_client = CkbRpcClient::new("https://testnet.ckbapp.dev/");
+        let ckb_client = CkbRpcClient::new(self.uri.as_str());
         ckb_client.get_cells(search_key, order, limit, cursor)
     }
 
@@ -105,7 +105,7 @@ impl RpcClient {
         out_point: &OutPoint,
         with_data: bool,
     ) -> Result<CellWithStatus, ckb_sdk::rpc::RpcError> {
-        let ckb_client = CkbRpcClient::new("https://testnet.ckbapp.dev/");
+        let ckb_client = CkbRpcClient::new(self.uri.as_str());
         ckb_client.get_live_cell(out_point.to_owned(), with_data)
     }
 }
