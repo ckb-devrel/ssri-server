@@ -1,5 +1,6 @@
-use ckb_jsonrpc_types::{OutPoint, Script, TransactionView};
+use ckb_jsonrpc_types::{Script, TransactionView};
 use ckb_types::H256;
+use error::Error;
 use jsonrpsee::core::async_trait;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee::server::Server;
@@ -11,7 +12,6 @@ mod rpc_client;
 mod ssri_vm;
 mod types;
 
-use error::Error;
 use hyper::Method;
 use rpc_client::RpcClient;
 use serde::Deserialize;
@@ -77,15 +77,11 @@ pub trait Rpc {
 
 pub struct RpcServerImpl {
     config: Config,
-    rpc: RpcClient,
 }
 
 impl RpcServerImpl {
     pub fn new(config: Config) -> Self {
-        Self {
-            rpc: RpcClient::new(&config.ckb_rpc),
-            config,
-        }
+        Self { config }
     }
 
     async fn run_script(
@@ -97,24 +93,15 @@ impl RpcServerImpl {
         cell: Option<CellOutputWithData>,
         tx: Option<TransactionView>,
     ) -> Result<VmResult, ErrorObjectOwned> {
-        let ssri_cell = self
-            .rpc
-            .get_live_cell(
-                &OutPoint {
-                    tx_hash: tx_hash.0.into(),
-                    index: index.into(),
-                },
-                true,
-            )
-            .await?;
-
-        let ssri_binary = ssri_cell
-            .cell
-            .ok_or(Error::InvalidRequest("Cell not found"))?
-            .data
-            .ok_or(Error::InvalidRequest("Cell doesn't have data"))?
-            .content
-            .into_bytes();
+        let config = self.config.clone();
+        tokio::runtime::Handle::current()
+            .spawn_blocking(move || -> Result<VmResult, ErrorObjectOwned>{
+        let rpc = RpcClient::new(&config.ckb_rpc);
+                let ssri_binary = rpc
+                    .get_cell(&tx_hash, index)?
+                    .ok_or(Error::InvalidRequest("Cell not found"))?
+                    .1
+                    .into_bytes();
 
         let script = script.map(Into::into);
         let cell = cell.map(Into::into);
@@ -124,18 +111,11 @@ impl RpcServerImpl {
         );
 
         let args = args.into_iter().map(|v| v.hex.into()).collect();
-        let res = execute_riscv_binary(
-            self.config.clone(),
-            self.rpc.clone(),
-            ssri_binary,
-            args,
-            script,
-            cell,
-            tx,
-        )?;
+        let res = execute_riscv_binary(config, rpc, ssri_binary, args, script, cell, tx)?;
         tracing::info!("{description}\nresult {res:?}");
-
         Ok(res)
+            })
+            .await.unwrap()
     }
 }
 

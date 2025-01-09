@@ -1,14 +1,14 @@
 // refer to https://github.com/nervosnetwork/ckb-vm/blob/develop/examples/ckb-vm-runner.rs
 
 use std::collections::HashSet;
-use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
 use ckb_hash::blake2b_256;
+use ckb_sdk::rpc::ckb_indexer::Order;
 use ckb_sdk::traits::CellQueryOptions;
 use ckb_types::core::Capacity;
 use ckb_types::packed::{CellOutput, OutPoint, Script, Transaction};
-use ckb_types::prelude::{Entity, ShouldBeOk};
+use ckb_types::prelude::{Entity, Unpack};
 use ckb_vm::cost_model::estimate_cycles;
 use ckb_vm::registers::{A0, A1, A2, A3, A4, A5, A7};
 use ckb_vm::{Bytes, Memory, Register, SupportMachine, Syscalls};
@@ -267,23 +267,19 @@ impl Context {
         let script = Script::from_slice(&machine.memory_mut().load_bytes(script_addr, script_len)?)
             .map_err(|_| error!("Invalid type script"))?;
 
-        let rpc = self.rpc.clone();
-        let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let cell = rpc.get_cells(CellQueryOptions::new_type(script).into(), 1, None);
-            tx.send(cell).unwrap();
-        });
-
-        let cell_pagination = rx
-            .recv()
-            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?;
-        let cell = cell_pagination
-            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
+        let cell = self
+            .rpc
+            .get_cells(
+                CellQueryOptions::new_type(script).into(),
+                Order::Asc,
+                1,
+                None,
+            )
+            .map_err(|_| error!("Failed to find cells"))?
             .objects
             .into_iter()
             .next()
             .ok_or(error!("Cell not found"))?;
-
         let out_point = OutPoint::from(cell.out_point);
         let len: u64 = out_point.as_slice().len() as u64;
         output!(machine, len_addr, out_point.as_slice(), addr, 0, len);
@@ -311,22 +307,12 @@ impl Context {
             .unwrap()
             .insert(out_point.clone());
 
-        let rpc = self.rpc.clone();
-        let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let cell = rpc.get_live_cell_ckb(&out_point.into(), false);
-            tx.send(cell).unwrap();
-        });
+        let (cell, _) = self
+            .rpc
+            .get_cell(&out_point.tx_hash().unpack(), out_point.index().unpack())
+            .map_err(|_| error!("Failed to get cell from RPC"))?
+            .ok_or(error!("Cell not found"))?;
 
-        let cell_pagination = rx
-            .recv()
-            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?;
-
-        let cell = cell_pagination
-            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
-            .cell
-            .should_be_ok()
-            .output;
         let cell = CellOutput::from(cell);
         let len: u64 = cell.as_slice().len() as u64;
         output!(machine, len_addr, cell.as_slice(), addr, 0, len);
@@ -354,25 +340,15 @@ impl Context {
             .unwrap()
             .insert(out_point.clone());
 
-        let rpc = self.rpc.clone();
-        let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let cell = rpc.get_live_cell_ckb(&out_point.into(), true);
-            tx.send(cell).unwrap();
-        });
+        let (_, data) = self
+            .rpc
+            .get_cell(&out_point.tx_hash().unpack(), out_point.index().unpack())
+            .map_err(|_| error!("Failed to get cell from RPC"))?
+            .ok_or(error!("Cell not found"))?;
+        let data = data.as_bytes();
 
-        let cell_pagination = rx
-            .recv()
-            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?;
-
-        let data = cell_pagination
-            .map_err(|_| ckb_vm::error::Error::External("Cell not found".to_owned()))?
-            .cell
-            .should_be_ok()
-            .data
-            .should_be_ok();
-        let len: u64 = data.content.as_bytes().len() as u64;
-        output!(machine, len_addr, data.content.as_bytes(), addr, 0, len);
+        let len: u64 = data.len() as u64;
+        output!(machine, len_addr, data, addr, 0, len);
         machine.set_register(A0, 0);
         Ok(())
     }
