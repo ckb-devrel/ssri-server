@@ -85,7 +85,7 @@ impl From<Bytes> for Hex {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CellOutputWithData {
     pub cell_output: CellOutput,
     pub hex_data: Option<Hex>,

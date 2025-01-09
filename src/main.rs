@@ -108,8 +108,6 @@ impl RpcServerImpl {
             )
             .await?;
 
-        tracing::info!("Running script on {tx_hash}:{index} with args {args:?}");
-
         let ssri_binary = ssri_cell
             .cell
             .ok_or(Error::InvalidRequest("Cell not found"))?
@@ -118,12 +116,15 @@ impl RpcServerImpl {
             .content
             .into_bytes();
 
-        let args = args.into_iter().map(|v| v.hex.into()).collect();
         let script = script.map(Into::into);
         let cell = cell.map(Into::into);
         let tx = tx.map(|v| v.inner.into());
+        let description = format!(
+            "Script {tx_hash}:{index} with args {args:?} context\nscript: {script:?}\ncell: {cell:?}\ntx: {tx:?}"
+        );
 
-        Ok(execute_riscv_binary(
+        let args = args.into_iter().map(|v| v.hex.into()).collect();
+        let res = execute_riscv_binary(
             self.config.clone(),
             self.rpc.clone(),
             ssri_binary,
@@ -132,7 +133,10 @@ impl RpcServerImpl {
             cell,
             tx,
         )?
-        .map(|v| v.into()))
+        .map(|v| v.into());
+        tracing::info!("{description}\nresult {res:?}");
+
+        Ok(res)
     }
 }
 
