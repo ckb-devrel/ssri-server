@@ -14,7 +14,7 @@ RUN --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
   cargo build --release
 
 COPY . .
-RUN cargo build --release
+RUN touch src/main.rs; cargo build --release
 
 FROM alpine:3
 RUN apk add --no-cache libgcc
