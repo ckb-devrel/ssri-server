@@ -1,0 +1,2 @@
+ckb_rpc = "https://testnet.ckbapp.dev/"
+server_addr = "0.0.0.0:9090"

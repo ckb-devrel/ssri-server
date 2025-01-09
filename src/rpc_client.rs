@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use ckb_jsonrpc_types::{CellWithStatus, JsonBytes, OutPoint, Uint32};
 use ckb_sdk::rpc::ckb_indexer::{Cell, Order, Pagination, SearchKey};
+use ckb_sdk::CkbRpcClient;
 use jsonrpc_core::futures::FutureExt;
 use jsonrpc_core::serde_json;
 use reqwest::{Client, Url};
@@ -81,19 +82,30 @@ impl RpcClient {
         search_key: SearchKey,
         limit: u32,
         cursor: Option<JsonBytes>,
-    ) -> RpcResponse<Pagination<Cell>> {
+    ) -> Result<Pagination<Cell>, ckb_sdk::RpcError> {
         let order = Order::Asc;
         let limit = Uint32::from(limit);
 
-        jsonrpc!(
-            "get_cells",
-            self,
-            Pagination<Cell>,
-            search_key,
-            order,
-            limit,
-            cursor,
-        )
-        .boxed()
+        // jsonrpc!(
+        //     "get_cells",
+        //     self,
+        //     Pagination<Cell>,
+        //     search_key,
+        //     order,
+        //     limit,
+        //     cursor,
+        // )
+        // .boxed()
+        let ckb_client = CkbRpcClient::new("https://testnet.ckbapp.dev/");
+        ckb_client.get_cells(search_key, order, limit, cursor)
+    }
+
+    pub fn get_live_cell_ckb(
+        &self,
+        out_point: &OutPoint,
+        with_data: bool,
+    ) -> Result<CellWithStatus, ckb_sdk::rpc::RpcError> {
+        let ckb_client = CkbRpcClient::new("https://testnet.ckbapp.dev/");
+        ckb_client.get_live_cell(out_point.to_owned(), with_data)
     }
 }

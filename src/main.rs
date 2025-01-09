@@ -12,10 +12,28 @@ mod ssri_vm;
 mod types;
 
 use error::Error;
+use hyper::Method;
 use rpc_client::RpcClient;
+use serde::Deserialize;
+use tower_http::cors::{Any, CorsLayer};
 use types::{CellOutputWithData, Hex};
 
 use ssri_vm::execute_riscv_binary;
+
+#[derive(Debug, Deserialize)]
+struct Settings {
+    ckb_rpc: String,
+    server_addr: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            ckb_rpc: "https://testnet.ckbapp.dev/".to_string(),
+            server_addr: "0.0.0.0:9090".to_string(),
+        }
+    }
+}
 
 #[rpc(server)]
 pub trait Rpc {
@@ -127,6 +145,7 @@ impl RpcServer for RpcServerImpl {
         args: Vec<Hex>,
         script: Script,
     ) -> Result<Option<Hex>, ErrorObjectOwned> {
+        println!("script: {:?}", script);
         self.run_script(tx_hash, index, args, Some(script), None, None)
             .await
     }
@@ -161,19 +180,45 @@ async fn main() -> anyhow::Result<()> {
         .try_init()
         .expect("setting default subscriber failed");
 
-    let ckb_rpc = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "https://testnet.ckbapp.dev/".to_string());
-    let server_addr = std::env::args()
-        .nth(2)
-        .unwrap_or_else(|| "0.0.0.0:9090".to_string());
+    // Start with default settings
+    let mut settings = Settings::default();
 
-    run_server(&ckb_rpc, &server_addr).await?;
+    // Try to load from config file
+    if let Ok(config) = config::Config::builder()
+        .add_source(config::File::with_name("config"))
+        .build()
+    {
+        if let Ok(file_settings) = config.try_deserialize::<Settings>() {
+            settings = file_settings;
+        }
+    }
+
+    // Override with command line arguments if present
+    if let Some(ckb_rpc) = std::env::args().nth(1) {
+        settings.ckb_rpc = ckb_rpc;
+    }
+    if let Some(server_addr) = std::env::args().nth(2) {
+        settings.server_addr = server_addr;
+    }
+
+    println!("Connecting to RPC with ckb_rpc: {:?}", settings.ckb_rpc);
+    println!("Starting server with server_addr: {:?}", settings.server_addr);
+    run_server(&settings.ckb_rpc, &settings.server_addr).await?;
     Ok(())
 }
 
 async fn run_server(ckb_rpc: &str, server_addr: &str) -> anyhow::Result<()> {
-    let server = Server::builder().build(server_addr).await?;
+    let cors = CorsLayer::new()
+        // Allow `POST` when accessing the resource
+        .allow_methods([Method::POST])
+        // Allow requests from any origin
+        .allow_origin(Any)
+        .allow_headers([hyper::header::CONTENT_TYPE]);
+    let middleware = tower::ServiceBuilder::new().layer(cors);
+    let server = Server::builder()
+        .set_http_middleware(middleware)
+        .build(server_addr)
+        .await?;
 
     let handle = server.start(RpcServerImpl::new(ckb_rpc).into_rpc());
 
