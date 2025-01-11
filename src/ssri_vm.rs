@@ -13,6 +13,7 @@ use ckb_vm::cost_model::estimate_cycles;
 use ckb_vm::registers::{A0, A1, A2, A3, A4, A5, A7};
 use ckb_vm::{Bytes, Memory, Register, SupportMachine, Syscalls};
 use hex::encode;
+use jsonrpsee::tracing;
 
 use crate::error::Error;
 use crate::rpc_client::RpcClient;
@@ -427,7 +428,7 @@ impl<M: SupportMachine<REG = u64>> Syscalls<M> for Context {
                     addr += 1;
                 }
 
-                println!("{}", String::from_utf8(buffer).unwrap());
+                tracing::info!("[Script Debug] {}", String::from_utf8(buffer).unwrap());
             }
             _ => return Ok(false),
         };
@@ -450,7 +451,7 @@ pub fn execute_riscv_binary(
     let asm_core = ckb_vm::machine::asm::AsmCoreMachine::new(
         ckb_vm::ISA_IMC | ckb_vm::ISA_B | ckb_vm::ISA_MOP | ckb_vm::ISA_A,
         ckb_vm::machine::VERSION2,
-        u64::MAX,
+        7_000_000_000,
     );
     let core = ckb_vm::DefaultMachineBuilder::new(asm_core)
         .instruction_cycle_func(Box::new(estimate_cycles))
